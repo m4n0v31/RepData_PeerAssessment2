@@ -1,0 +1,86 @@
+#Healt and Economic Consequences of Storms and Other Severe Weather Events
+
+##Synopsis
+In this report we aim to describe the healt and economics effects and consequences of storms and other severe weather events in the U.S..
+
+The U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database tracks characteristics of major storms and weather events in the United States, including when and where they occur, as well as estimates of any fatalities, injuries, and property damage. Events in the database are tracked from 1950 to November 2011.
+
+Exploration of the U.S. NOAA storm database allowed us to identify which severe weather events are to be considered most harmful for the healt of the population and additionally to define which events have the greatest economic impact.
+
+From these data, we found that, **TORNADO** is the type of event which has to be considered the most harmful for the healt of the population, while **FLOOD** is the type of event which has the greatest economic impact.
+
+##Data Processing
+
+###Storm Data
+The storm data is available [here](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2), and documentation for the database is available in the [Storm Data Documentation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf) and [FAQ](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf).
+
+###Reading the data
+Load the compressed data file and read it using the read.csv function:
+```{r, cache=TRUE}
+conn <- bzfile("repdata-data-StormData.csv.bz2", "r")
+data <- read.csv(conn)
+close(conn)
+rm(conn)
+str(data)
+```
+
+###Filtering the data
+Filter data based on only the **Permitter Storm Data Events** (as reported in the *Storm Data Documentation* §2.1.1):
+```{r, cache=TRUE}
+permitted_events <- c("Astronomical Low Tide", "Avalanche", "Blizzard", "Coastal Flood", "Cold/Wind Chill", "Debris Flow", "Dense Fog", "Dense Smoke", "Drought", "Dust Devil", "Dust Storm", "Excessive Heat", "Extreme Cold/Wind Chill", "Flash Flood", "Flood", "Frost/Freeze", "Funnel Cloud", "Freezing Fog", "Hail", "Heat", "Heavy Rain", "Heavy Snow", "High Surf", "High Wind", "Hurricane (Typhoon)", "Ice Storm", "Lake-Effect Snow", "Lakeshore Flood", "Lightning", "Marine Hail", "Marine High Wind", "Marine Strong Wind", "Marine Thunderstorm Wind", "Rip Current", "Seiche", "Sleet", "Storm Surge/Tide", "Strong Wind", "Thunderstorm Wind", "Tornado", "Tropical Depression", "Tropical Storm", "Tsunami", "Volcanic Ash", "Waterspout", "Wildfire", "Winter Storm", "Winter Weather")
+
+filtered_data <- data[toupper(data$EVTYPE) %in% toupper(permitted_events), ]
+head(filtered_data)
+```
+
+###Analyzing the data
+
+**Fatalities and injuries** 
+
+The data was analyzed in order to calculate the total number of fatalities and injuries due to a particular event type. The event types were then sorted in descending order based on the total fatalities occurred. Bar plots are displayed for a subset of all the event types, only the more harmful are showed. It is clear that **TORNADO** is the most harmful event type for the healt of the population.
+
+The code aggregates injuries and fatalities per event type. Then a subset of the 12 event type with the most fatalities is intersected with the 12 event type with the most injuries. This gives the most harmful event types to be displayed in an ordered way in a facet bar plot. The data for the plot is obtained by transforming (melting) the aggregated values.
+```{r}
+tot_incidents <- aggregate(cbind(INJURIES, FATALITIES) ~ EVTYPE, filtered_data, sum, na.rm = TRUE)
+tot_incidents <- setNames(tot_incidents, c("EVTYPE", "TOT_INJURIES", "TOT_FATALITIES"))
+
+top_fatalities <- tot_incidents[with(tot_incidents, order(-TOT_FATALITIES)), ]
+top_injuries <- tot_incidents[with(tot_incidents, order(-TOT_INJURIES)), ]
+
+top_incidents <- intersect(top_fatalities[seq(1,12), c("EVTYPE")], top_injuries[seq(1,12), c("EVTYPE")])
+
+library(reshape2)
+tot_incidents <- melt(tot_incidents, id.vars=c("EVTYPE"))
+tot_incidents <- subset(tot_incidents, EVTYPE %in% top_incidents)
+tot_incidents$variable <- relevel(tot_incidents$variable, "TOT_FATALITIES")
+tot_incidents <- tot_incidents[with(tot_incidents, order(variable, -value)), ]
+
+library(ggplot2)
+library(plyr)
+ggplot(tot_incidents, aes(x=EVTYPE, y=value)) + geom_bar(stat="identity") + facet_wrap( ~ variable, ncol=1, scales = "free_y") + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + scale_x_discrete(limits=unique(tot_incidents$EVTYPE)) + xlab("Event Type") + ylab("Number of Fatalities/Injuries") + ggtitle("Total injuries and fatalities for the most harmful event types")
+```
+
+**Economical Damages** 
+
+The data was further analyzed in order to identify the event with greatest economical impact. The analysis clearly shows that **FLOOD** is the event type with the greatest economical impact. 
+
+The code calculate the economical damage for each event type by multiplying CROP and PROP damages with their factors (hundreds "h/H", tousands "k/K", millions "m/M", billions "b/B") and then adds them together. The economic damage is then aggregated per event type, giving the total economic damage which is then displayed in an ordered way for the 10 most damaging event types. 
+```{r}
+filtered_data$PROPDMGEXP <- gsub("B", 1000000000, ignore.case = TRUE, gsub("M", 1000000, ignore.case = TRUE, gsub("K", 1000, ignore.case = TRUE, gsub("H", 100, ignore.case = TRUE,gsub("$^", 1, filtered_data$PROPDMGEXP)))))
+
+filtered_data$CROPDMGEXP  <- gsub("B", 1000000000, ignore.case = TRUE, gsub("M", 1000000, ignore.case = TRUE, gsub("K", 1000, ignore.case = TRUE, gsub("H", 100, ignore.case = TRUE, gsub("$^", 1, filtered_data$CROPDMGEXP)))))
+
+filtered_data$economical_damage <- suppressWarnings(filtered_data$CROPDMG * as.numeric(filtered_data$CROPDMGEXP) + filtered_data$PROPDMG * as.numeric(filtered_data$PROPDMGEXP))
+
+tot_ecodmg <- aggregate(economical_damage ~ EVTYPE, filtered_data, sum, na.rm = TRUE)
+tot_ecodmg <- tot_ecodmg[with(tot_ecodmg, order(-economical_damage)), ]
+
+ggplot(head(tot_ecodmg, n = 10), aes(x=EVTYPE, y=economical_damage)) + geom_bar(stat="identity") + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + scale_x_discrete(limits=head(tot_ecodmg$EVTYPE,10)) + xlab("Event Type") + ylab("Economical Damage in Dollars") + ggtitle("Total economical damage in dollars\nfor the event types with the biggest impact")
+
+```
+
+##Results
+This research clearly shows that:
+
+1. **TORNADO** is the most harmful event type for the population.
+2. **FLOOD** is the event type with the biggest economic impact. 
